@@ -83,56 +83,104 @@ app.get('/api/test', (req, res) => {
   res.json({ message: 'Servidor funcionando correctamente' });
 });
 
-// Función optimizada para evaluar un mentor
-async function evaluateMentor(mentee, mentor) {
+// Función para evaluar un mentor con puntuación por componentes - versión optimizada
+const evaluateMentor = async (mentor, mentee, requestId) => {
   try {
-    // Extraer información esencial de manera eficiente
-    const mentorName = mentor.name || mentor.nombre || mentor.full_name || 'Sin nombre';
-    const mentorTitle = mentor.title || mentor.role || mentor.position || 'No especificado';
-    const mentorCompany = mentor.company || mentor.organization || 'No especificada';
-    const mentorBio = extractBio(mentor);
+    // Loguear datos originales para diagnóstico
+    console.log(`[DEBUG] Datos originales del mentor:`, {
+      id: mentor.id || mentor.mentor_id,
+      name: mentor.name,
+      first_name: mentor.first_name,
+      last_name: mentor.last_name,
+      title: mentor.title,
+      current_title: mentor.current_title,
+      company: mentor.company,
+      bio: mentor.bio?.substring(0, 50) + '...'
+    });
     
-    // Prompt simplificado (más corto = más rápido)
-    const prompt = `
-      MENTEE: ${mentee.name} busca: ${mentee.lookingFor}
-      
-      MENTOR: ${mentorName}, ${mentorTitle} en ${mentorCompany}. 
-      Bio: ${mentorBio.slice(0, 500)}
-      
-      Evalúa la compatibilidad (0-100) entre este mentee y mentor basado en intereses, experiencia y habilidades. Responde en JSON: {"score": N, "reason": "explicación"}
-    `;
-
-    const completion = await openai.chat.completions.create({
+    // Asegurarnos que estamos normalizando los campos del mentor antes de usarlos
+    const normalizedMentor = {
+      id: mentor.id || mentor.mentor_id || mentor.userId || `temp-${Date.now()}`,
+      name: mentor.name || 
+            (mentor.first_name && mentor.last_name ? `${mentor.first_name} ${mentor.last_name}` : null) || 
+            mentor.full_name || 
+            'Sin nombre',
+      title: mentor.current_title || mentor.title || mentor.role || mentor.position || mentor.cargo || mentor.puesto || 'No especificado',
+      company: mentor.company || mentor.current_company || mentor.organization || mentor.empresa || 'No especificada',
+      bio: extractBio(mentor)
+    };
+    
+    // Loguear datos normalizados para diagnóstico
+    console.log(`[DEBUG] Datos normalizados:`, normalizedMentor);
+    
+    // Sistema de prompt mejorado con énfasis en relevancia temática
+    const compatibilityResponse = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
       messages: [
-        { role: "system", content: "Evaluador experto de compatibilidad mentor-mentee. Responde en JSON: {score, reason}" },
-        { role: "user", content: prompt }
+        { 
+          role: "system", 
+          content: `Eres un experto en matching de mentores y mentees. Tu tarea es analizar la compatibilidad entre un mentor y un mentee, dividiendo tu análisis en tres componentes:
+          
+          1. RELEVANCIA TEMÁTICA (0-50 puntos): ¿Qué tan directamente relacionada está la experiencia/conocimiento del mentor con lo que busca el mentee?
+          2. EXPERIENCIA GENERAL (0-30 puntos): ¿Tiene el mentor suficiente experiencia profesional relevante para este mentee?
+          3. ENFOQUE DE MENTORÍA (0-20 puntos): ¿El estilo y filosofía de mentoría del mentor son adecuados para el mentee?
+          
+          Prioriza fuertemente la RELEVANCIA TEMÁTICA directa. Si un mentor es especialista exactamente en lo que busca el mentee, debe recibir una puntuación alta, incluso si otros aspectos son menos fuertes.`
+        },
+        { 
+          role: "user", 
+          content: `Evalúa la compatibilidad entre este mentor y mentee usando el sistema de componentes:
+          
+          MENTOR:
+          Nombre: ${normalizedMentor.name}
+          Cargo: ${normalizedMentor.title}
+          Empresa: ${normalizedMentor.company}
+          Biografía: ${normalizedMentor.bio}
+          
+          MENTEE:
+          Nombre: ${mentee.name}
+          Busca: ${mentee.lookingFor}
+          
+          Responde con un JSON con este formato exacto:
+          {
+            "relevancia_tematica": (0-50),
+            "experiencia_general": (0-30),
+            "enfoque_mentoria": (0-20),
+            "puntuacion_total": (suma de los tres componentes)
+          }`
+        }
       ],
-      model: "gpt-4-turbo",
-      temperature: 0.5, // Reducido para mayor consistencia
+      temperature: 0.3,
       response_format: { type: "json_object" },
-      max_tokens: 500 // Limitar tokens para mayor velocidad
     });
 
-    const response = JSON.parse(completion.choices[0].message.content);
+    // Analizar la respuesta JSON
+    const result = JSON.parse(compatibilityResponse.choices[0].message.content);
+    const score = result.puntuacion_total;
     
+    // Ya no necesitamos generar explicaciones detalladas
+    // La eliminamos para optimizar la llamada a la API
+
     return {
-      mentor: {
-        name: mentorName,
-        title: mentorTitle,
-        company: mentorCompany,
-        id: mentor.id || ''
-      },
-      score: response.score,
-      reason: response.reason
+      mentor: normalizedMentor,
+      score,
+      components: {
+        relevance: result.relevancia_tematica,
+        experience: result.experiencia_general,
+        approach: result.enfoque_mentoria
+      }
     };
   } catch (error) {
-    console.error('Error evaluando mentor:', error);
-    throw error; // Rethrow para gestión centralizada
+    console.error(`Error evaluando mentor ${mentor.name}:`, error);
+    throw error;
   }
-}
+};
 
 // Función auxiliar para extraer bio de manera eficiente
 function extractBio(mentor) {
+  // Diagnóstico completo de todos los campos para identificar el problema
+  console.log("[DIAGNÓSTICO COMPLETO]", JSON.stringify(mentor));
+  
   if (typeof mentor.bio === 'string') return mentor.bio;
   if (mentor.description) return mentor.description;
   if (mentor.about) return mentor.about;
@@ -178,6 +226,9 @@ app.post('/api/match', async (req, res) => {
     if (!mentee || !mentors || !Array.isArray(mentors)) {
       return res.status(400).json({ error: 'Datos incompletos' });
     }
+    
+    // Conservar todos los datos originales sin modificarlos
+    console.log("[DATOS ORIGINALES RECIBIDOS]:", mentors[0]);
     
     const mentorsToProcess = mentors;
     const batchSize = mentorsToProcess.length;
@@ -245,12 +296,14 @@ app.post('/api/match', async (req, res) => {
     // Procesar mentores de forma concurrente con gestión avanzada
     const processingPromises = mentorsToProcess.map((mentor, index) => 
       limit(async () => {
-        const mentorId = mentor.id || index;
+        const mentorId = mentor.id || mentor.mentor_id || index;
+        const mentorName = mentor.name || mentor.first_name || `Mentor #${index+1}`;
         const startMentorTime = Date.now();
         
         try {
           // Procesar mentor individualmente
-          const result = await evaluateMentor(mentee, mentor);
+          console.log("[ESTRUCTURA COMPLETA]", JSON.stringify(mentor, null, 2));
+          const result = await evaluateMentor(mentor, mentee, requestId);
           
           // Actualizar resultados y estadísticas
           results[index] = result;
@@ -259,7 +312,7 @@ app.post('/api/match', async (req, res) => {
           
           // Registrar tiempo y enviar progreso
           const mentorTime = ((Date.now() - startMentorTime) / 1000).toFixed(2);
-          console.log(`✅ [${requestId}] Mentor #${index+1} (${mentor.name || 'Sin nombre'}) procesado en ${mentorTime}s`);
+          console.log(`✅ [${requestId}] Mentor #${index+1} (${result.mentor.name}) procesado en ${mentorTime}s`);
           
           if (processed % 5 === 0 || processed === batchSize) {
             sendProgress(processed, batchSize, succeeded, failed);
@@ -267,9 +320,9 @@ app.post('/api/match', async (req, res) => {
           
           return result;
         } catch (error) {
-          // Gestión sofisticada de errores
+          // Gestión sofisticada de errores corregida
           const errorMsg = error.message || 'Error desconocido';
-          console.error(`❌ [${requestId}] Error en mentor #${index+1} (${mentor.name || 'Sin nombre'}): ${errorMsg}`);
+          console.error(`❌ [${requestId}] Error en mentor #${index+1} (${mentorName}): ${errorMsg}`);
           
           processed++;
           failed++;

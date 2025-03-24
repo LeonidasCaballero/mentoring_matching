@@ -85,12 +85,17 @@ const normalizeMentorData = (mentor) => {
     bio = 'No disponible';
   }
   
+  // CAMBIO CRUCIAL: Preservar current_title como title
+  const title = mentor.current_title || mentor.title || mentor.role || mentor.position || mentor.cargo || mentor.puesto || 'No especificado';
+  
   return {
     id: mentor.id || mentor.mentor_id || mentor.userId || Date.now() + Math.random(),
     name: name,
-    title: mentor.title || mentor.role || mentor.position || mentor.cargo || mentor.puesto || 'No especificado',
+    title: title, // Ahora usamos la variable que extrae primero current_title
     company: mentor.company || mentor.organization || mentor.empresa || mentor.organizacion || 'No especificada',
-    bio: bio
+    bio: bio,
+    // Preservar current_title para que el servidor también lo tenga disponible
+    current_title: mentor.current_title
   };
 };
 
@@ -148,24 +153,25 @@ function App() {
     try {
       for (let i = 0; i < allMentors.length; i += BATCH_SIZE) {
         const currentBatch = allMentors.slice(i, i + BATCH_SIZE);
-        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-        const totalBatches = Math.ceil(allMentors.length / BATCH_SIZE);
         
-        console.log(`Procesando lote ${batchNumber}/${totalBatches} (${currentBatch.length} mentores)`);
-        
-        // Actualizar progreso antes de comenzar el procesamiento
+        // Actualizar progreso al inicio de cada lote
         setProgress({
-          current: batchNumber,
+          current: Math.floor(i / BATCH_SIZE) + 1,
           total: allMentors.length,
           processed: processedResults.length
         });
+        
+        // Imprimir explícitamente los datos que se están enviando
+        console.log("Enviando al servidor batch con primer mentor:", 
+                    JSON.stringify(currentBatch[0]));
         
         const response = await fetch('http://localhost:5002/api/match', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             mentee: menteeInfo,
-            mentors: currentBatch
+            // Enviar los datos sin normalizar para preservar todos los campos originales
+            mentors: currentBatch 
           }),
         });
         
@@ -179,12 +185,14 @@ function App() {
         
         // Actualizar resultados ordenados
         setResults(processedResults);
+        
+        // Actualizar progreso después de procesar cada lote
         setProgress(prev => ({
           ...prev,
           processed: processedResults.length
         }));
         
-        console.log(`Lote ${batchNumber}/${totalBatches} completado, total matches: ${processedResults.length}`);
+        console.log(`Lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(allMentors.length / BATCH_SIZE)} completado, total matches: ${processedResults.length}`);
       }
       
       // Ordenación final para asegurar que todo esté en orden correcto
@@ -208,6 +216,11 @@ function App() {
     setLoading(true);
     setError(null);
     setResults([]);
+    setProgress({ 
+      current: 0, 
+      total: 0,
+      processed: 0
+    });
 
     try {
       let allMentors = [];
@@ -229,8 +242,14 @@ function App() {
           return;
         }
         
-        // Normalizar todos los mentores
-        allMentors = supabaseMentors.map(normalizeMentorData);
+        // IMPORTANTE: Enviar los datos originales sin normalizar
+        allMentors = supabaseMentors;
+        console.log("Primeros 3 mentores de Supabase:", 
+                    supabaseMentors.slice(0, 3).map(m => ({
+                      mentor_id: m.mentor_id, 
+                      first_name: m.first_name,
+                      current_title: m.current_title
+                    })));
       }
       
       console.log(`Total de ${allMentors.length} mentores disponibles`);
@@ -244,6 +263,12 @@ function App() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (results.length > 0) {
+      console.log("Primer mentor recibido:", results[0].mentor);
+    }
+  }, [results]);
 
   return (
     <div className="App">
@@ -292,12 +317,25 @@ function App() {
           <div className="loading">
             <p>Evaluando compatibilidad con mentores...</p>
             {progress.total > 0 && (
-              <p>
-                Progreso: Lote {progress.current} de {Math.ceil(progress.total / MENTORS_PER_PAGE)} 
-                ({Math.round((progress.current * MENTORS_PER_PAGE / progress.total) * 100)}%)
-                <br/>
-                Mentores procesados: {progress.processed}
-              </p>
+              <>
+                <div className="progress-container">
+                  <div 
+                    className="progress-bar" 
+                    style={{
+                      width: `${Math.min(Math.round((progress.processed / progress.total) * 100), 100)}%`
+                    }}
+                  >
+                    <span className="progress-text">
+                      {Math.min(Math.round((progress.processed / progress.total) * 100), 100)}%
+                    </span>
+                  </div>
+                </div>
+                <p className="progress-stats">
+                  Mentores procesados: {progress.processed} de {progress.total}
+                  <br />
+                  {progress.processed < progress.total ? 'Procesando...' : 'Completado'}
+                </p>
+              </>
             )}
           </div>
         )}
@@ -308,19 +346,44 @@ function App() {
             <div className="results">
               {results.map((match, index) => (
                 <div key={index} className="match-card">
+                  {/* Score general */}
                   <div className="match-score">{match.score}%</div>
+                  
+                  {/* Información básica */}
                   <h3>{match.mentor.name}</h3>
                   <p className="mentor-title">{match.mentor.title}</p>
-                  {match.mentor.company && (
-                    <p className="mentor-company">{match.mentor.company}</p>
-                  )}
+                  
+                  {/* Bio */}
                   <div className="mentor-bio">
                     <p>{match.mentor.bio}</p>
                   </div>
-                  <div className="match-reason">
-                    <h4>¿Por qué es un buen match?</h4>
-                    <p>{match.reason}</p>
-                  </div>
+                  
+                  {/* Componentes de puntuación */}
+                  {match.components && (
+                    <div className="score-components">
+                      <div className="component">
+                        <span className="component-name">Relevancia temática:</span>
+                        <div className="component-bar">
+                          <div className="component-fill" style={{width: `${match.components.relevance * 2}%`}}></div>
+                        </div>
+                        <span className="component-value">{match.components.relevance}/50</span>
+                      </div>
+                      <div className="component">
+                        <span className="component-name">Experiencia:</span>
+                        <div className="component-bar">
+                          <div className="component-fill" style={{width: `${match.components.experience * 3.33}%`}}></div>
+                        </div>
+                        <span className="component-value">{match.components.experience}/30</span>
+                      </div>
+                      <div className="component">
+                        <span className="component-name">Enfoque de mentoría:</span>
+                        <div className="component-bar">
+                          <div className="component-fill" style={{width: `${match.components.approach * 5}%`}}></div>
+                        </div>
+                        <span className="component-value">{match.components.approach}/20</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
