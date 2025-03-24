@@ -113,7 +113,7 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
     // Loguear datos normalizados para diagnóstico
     console.log(`[DEBUG] Datos normalizados:`, normalizedMentor);
     
-    // Sistema de prompt mejorado con criterios ESTRICTOS de relevancia temática
+    // Sistema de prompt mejorado con criterios ESTRICTOS y CONOCIMIENTO DE LA INDUSTRIA
     const compatibilityResponse = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
@@ -121,25 +121,24 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
           role: "system", 
           content: `Eres un experto en matching de mentores y mentees con criterios MUY ESTRICTOS y CONOCIMIENTO DE LA INDUSTRIA.
 
-1. RELEVANCIA TEMÁTICA (0-70 puntos): Sé EXTREMADAMENTE CRÍTICO y EXIGENTE.
-   - TERMINOLOGÍA ESPECIALIZADA: Debes conocer términos específicos de la industria:
-     * "MBB" = McKinsey, BCG y Bain (las principales consultoras)
-     * "FAANG" = Facebook/Meta, Apple, Amazon, Netflix, Google
-     * "IB" = Investment Banking
-   
-   - ANÁLISIS DE EXPERIENCIA REAL:
-     * Si el mentee busca entrar a MBB y el mentor trabaja/trabajó en McKinsey, BCG o Bain = 60-70 puntos
-     * Si el mentor menciona explícitamente ayudar con el proceso de selección para el tipo de empresa específico = 50-60 puntos
-     * Si el mentor trabaja en la industria pero no en empresas específicas = 30-50 puntos
-     * Mentores sin conexión directa con la industria buscada = 0-20 puntos
+1. RELEVANCIA TEMÁTICA (0-70 puntos): 
+   - PASO 1: IDENTIFICA EXACTAMENTE lo que busca el mentee en sus propias palabras.
+   - PASO 2: Evalúa si el mentor tiene experiencia DIRECTA en esas áreas ESPECÍFICAS.
 
+   CONOCIMIENTO DE TERMINOLOGÍA:
+   - Conoces términos como "MBB" (McKinsey, BCG, Bain), "FAANG" (Facebook/Meta, Apple, Amazon, Netflix, Google), "IB" (Investment Banking)
+   - Usa este conocimiento SÓLO cuando sea relevante para la búsqueda específica del mentee
+
+   Ejemplos de puntuación:
+   - Si mentee busca "desarrollo profesional y comunicación" y el mentor es experto en comunicación = 60-70 puntos
+   - Si mentee busca "trabajo en MBB" y mentor trabajó en BCG = 60-70 puntos
+   - Si mentee busca "desarrollo profesional" y mentor trabajó en McKinsey pero no menciona desarrollo = 20-30 puntos
+   
 2. EXPERIENCIA GENERAL (0-20 puntos): Experiencia profesional verificable.
 
 3. ENFOQUE DE MENTORÍA (0-10 puntos): Estilo y metodología de mentoría.
 
-IMPORTANTE: Debes verificar PRIMERO si el mentor tiene experiencia DIRECTA en lo que busca el mentee. Los mentores que HAN TRABAJADO en las empresas donde el mentee quiere entrar deben recibir la MÁXIMA puntuación de relevancia.
-
-Ejemplo: Si el mentee quiere "get a job in MBB" y el mentor trabajó en BCG = mínimo 65 puntos en relevancia.`
+IMPORTANTE: La relevancia temática SOLO debe ser alta cuando hay coincidencia DIRECTA con lo que el mentee EXPLÍCITAMENTE busca. Las empresas prestigiosas son relevantes SÓLO si corresponden a lo que busca el mentee específicamente.`
         },
         { 
           role: "user", 
