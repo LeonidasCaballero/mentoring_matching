@@ -58,9 +58,9 @@ const port = process.env.PORT || 5002;
 
 // Middleware - aumentar límites de tamaño de solicitud
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://tu-dominio-real.netlify.app'] 
-    : 'http://localhost:3000'
+  origin: '*',  // Permitir cualquier origen temporalmente para diagnóstico
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Aumentar significativamente los límites de tamaño
@@ -385,4 +385,16 @@ app.listen(port, () => {
   🔑 API Key OpenAI: ${process.env.OPENAI_API_KEY ? "Configurada ✅" : "NO CONFIGURADA ❌"}
   ===========================================
   `);
+});
+
+// Configuración CORS explícita
+app.use(cors());
+app.options('*', cors()); // Habilitar pre-flight para todas las rutas
+
+// Middleware adicional para asegurar que los encabezados CORS se establecen
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://mentor-matching-app.netlify.app');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
 });
