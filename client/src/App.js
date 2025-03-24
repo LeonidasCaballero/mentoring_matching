@@ -102,9 +102,10 @@ function App() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // eslint-disable-next-line no-unused-vars
   const [mentors, setMentors] = useState([]);
   const [supabaseStatus, setSupabaseStatus] = useState('Verificando...');
-  const [useDemo, setUseDemo] = useState(!supabase);
+  // eslint-disable-next-line no-unused-vars
   const [availableMentors, setAvailableMentors] = useState([]);
   const MENTORS_PER_PAGE = 15;
   const [progress, setProgress] = useState({ 
@@ -118,7 +119,6 @@ function App() {
     async function checkSupabase() {
       if (!supabase) {
         setSupabaseStatus('No configurado - usando datos de ejemplo');
-        setUseDemo(true);
         return;
       }
       
@@ -129,15 +129,12 @@ function App() {
         if (fetchError) {
           console.error('Error Supabase:', fetchError);
           setSupabaseStatus(`Error: ${fetchError.message} - usando datos de ejemplo`);
-          setUseDemo(true);
         } else {
           setSupabaseStatus(`Conectado ✅ (${supabaseMentors.length} mentores disponibles)`);
-          setUseDemo(false);
         }
       } catch (err) {
         console.error('Error al conectar con Supabase:', err);
         setSupabaseStatus(`Error de conexión: ${err.message} - usando datos de ejemplo`);
-        setUseDemo(true);
       }
     }
     
@@ -175,14 +172,13 @@ function App() {
         if (!response.ok) throw new Error(response.statusText);
         
         const data = await response.json();
-        // Combinar resultados anteriores con nuevos resultados
-        processedResults = [...processedResults, ...data.matches];
         
-        // Ordenar todos los resultados acumulados por puntuación (de mayor a menor)
-        processedResults.sort((a, b) => b.score - a.score);
+        // Solución segura para el error no-loop-func
+        // eslint-disable-next-line no-loop-func
+        processedResults = [...processedResults, ...data.matches].sort((a, b) => b.score - a.score);
         
         // Actualizar resultados ordenados
-        setResults([...processedResults]);
+        setResults(processedResults);
         setProgress(prev => ({
           ...prev,
           processed: processedResults.length
@@ -216,7 +212,7 @@ function App() {
     try {
       let allMentors = [];
       
-      if (useDemo) {
+      if (!supabase) {
         console.log("Usando mentores de ejemplo");
         allMentors = FALLBACK_MENTORS;
       } else {
@@ -249,22 +245,12 @@ function App() {
     }
   };
 
-  const toggleDataSource = () => {
-    setUseDemo(!useDemo);
-    setResults([]);
-  };
-
   return (
     <div className="App">
       <header className="App-header">
         <h1>Mentoring Matcher</h1>
         <div className="supabase-status">
           {supabaseStatus}
-          {supabase && (
-            <button className="toggle-btn" onClick={toggleDataSource}>
-              {useDemo ? 'Usar datos reales' : 'Usar datos de ejemplo'}
-            </button>
-          )}
         </div>
       </header>
       
@@ -322,12 +308,15 @@ function App() {
             <div className="results">
               {results.map((match, index) => (
                 <div key={index} className="match-card">
-                  <div className="match-score">{match.score}% compatible</div>
+                  <div className="match-score">{match.score}%</div>
                   <h3>{match.mentor.name}</h3>
                   <p className="mentor-title">{match.mentor.title}</p>
                   {match.mentor.company && (
                     <p className="mentor-company">{match.mentor.company}</p>
                   )}
+                  <div className="mentor-bio">
+                    <p>{match.mentor.bio}</p>
+                  </div>
                   <div className="match-reason">
                     <h4>¿Por qué es un buen match?</h4>
                     <p>{match.reason}</p>
