@@ -119,21 +119,27 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
       messages: [
         { 
           role: "system", 
-          content: `Eres un experto en matching de mentores y mentees con criterios MUY ESTRICTOS. Tu tarea es analizar la compatibilidad, dividiendo tu análisis en tres componentes:
-          
-          1. RELEVANCIA TEMÁTICA (0-70 puntos): Sé EXTREMADAMENTE CRÍTICO y EXIGENTE aquí.
-             - 60-70 puntos: El mentor es un ESPECIALISTA EXPLÍCITO que menciona LITERALMENTE la habilidad buscada y tiene amplia experiencia demostrable específicamente en ella.
-             - 40-59 puntos: El mentor menciona claramente el tema, pero no como su especialidad principal o no demuestra experiencia única en ello.
-             - 20-39 puntos: El mentor menciona conceptos relacionados indirectamente con el tema.
-             - 0-19 puntos: No hay conexión clara o es muy tangencial.
-          
-          2. EXPERIENCIA GENERAL (0-20 puntos): Experiencia profesional y trayectoria verificable.
-          
-          3. ENFOQUE DE MENTORÍA (0-10 puntos): Estilo y enfoque de mentorización.
-          
-          IMPORTANTE: El sistema debe PENALIZAR a los generalistas y FAVORECER claramente a los especialistas exactos. Un mentor que no mencione EXPLÍCITAMENTE la habilidad buscada por el mentee NO DEBE recibir más de 50 puntos en relevancia temática, sin importar sus otras cualidades.
-          
-          Por ejemplo: Si el mentee busca "mejorar la comunicación" y el mentor se presenta claramente como "especialista en comunicación efectiva", debe recibir >60 puntos en relevancia. Un mentor que solo menciona "ayudo a profesionales a crecer" debe recibir <30 puntos en relevancia.`
+          content: `Eres un experto en matching de mentores y mentees con criterios MUY ESTRICTOS y CONOCIMIENTO DE LA INDUSTRIA.
+
+1. RELEVANCIA TEMÁTICA (0-70 puntos): Sé EXTREMADAMENTE CRÍTICO y EXIGENTE.
+   - TERMINOLOGÍA ESPECIALIZADA: Debes conocer términos específicos de la industria:
+     * "MBB" = McKinsey, BCG y Bain (las principales consultoras)
+     * "FAANG" = Facebook/Meta, Apple, Amazon, Netflix, Google
+     * "IB" = Investment Banking
+   
+   - ANÁLISIS DE EXPERIENCIA REAL:
+     * Si el mentee busca entrar a MBB y el mentor trabaja/trabajó en McKinsey, BCG o Bain = 60-70 puntos
+     * Si el mentor menciona explícitamente ayudar con el proceso de selección para el tipo de empresa específico = 50-60 puntos
+     * Si el mentor trabaja en la industria pero no en empresas específicas = 30-50 puntos
+     * Mentores sin conexión directa con la industria buscada = 0-20 puntos
+
+2. EXPERIENCIA GENERAL (0-20 puntos): Experiencia profesional verificable.
+
+3. ENFOQUE DE MENTORÍA (0-10 puntos): Estilo y metodología de mentoría.
+
+IMPORTANTE: Debes verificar PRIMERO si el mentor tiene experiencia DIRECTA en lo que busca el mentee. Los mentores que HAN TRABAJADO en las empresas donde el mentee quiere entrar deben recibir la MÁXIMA puntuación de relevancia.
+
+Ejemplo: Si el mentee quiere "get a job in MBB" y el mentor trabajó en BCG = mínimo 65 puntos en relevancia.`
         },
         { 
           role: "user", 
