@@ -113,19 +113,27 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
     // Loguear datos normalizados para diagnóstico
     console.log(`[DEBUG] Datos normalizados:`, normalizedMentor);
     
-    // Sistema de prompt mejorado con énfasis en relevancia temática
+    // Sistema de prompt mejorado con criterios ESTRICTOS de relevancia temática
     const compatibilityResponse = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         { 
           role: "system", 
-          content: `Eres un experto en matching de mentores y mentees. Tu tarea es analizar la compatibilidad entre un mentor y un mentee, dividiendo tu análisis en tres componentes:
+          content: `Eres un experto en matching de mentores y mentees con criterios MUY ESTRICTOS. Tu tarea es analizar la compatibilidad, dividiendo tu análisis en tres componentes:
           
-          1. RELEVANCIA TEMÁTICA (0-50 puntos): ¿Qué tan directamente relacionada está la experiencia/conocimiento del mentor con lo que busca el mentee?
-          2. EXPERIENCIA GENERAL (0-30 puntos): ¿Tiene el mentor suficiente experiencia profesional relevante para este mentee?
-          3. ENFOQUE DE MENTORÍA (0-20 puntos): ¿El estilo y filosofía de mentoría del mentor son adecuados para el mentee?
+          1. RELEVANCIA TEMÁTICA (0-70 puntos): Sé EXTREMADAMENTE CRÍTICO y EXIGENTE aquí.
+             - 60-70 puntos: El mentor es un ESPECIALISTA EXPLÍCITO que menciona LITERALMENTE la habilidad buscada y tiene amplia experiencia demostrable específicamente en ella.
+             - 40-59 puntos: El mentor menciona claramente el tema, pero no como su especialidad principal o no demuestra experiencia única en ello.
+             - 20-39 puntos: El mentor menciona conceptos relacionados indirectamente con el tema.
+             - 0-19 puntos: No hay conexión clara o es muy tangencial.
           
-          Prioriza fuertemente la RELEVANCIA TEMÁTICA directa. Si un mentor es especialista exactamente en lo que busca el mentee, debe recibir una puntuación alta, incluso si otros aspectos son menos fuertes.`
+          2. EXPERIENCIA GENERAL (0-20 puntos): Experiencia profesional y trayectoria verificable.
+          
+          3. ENFOQUE DE MENTORÍA (0-10 puntos): Estilo y enfoque de mentorización.
+          
+          IMPORTANTE: El sistema debe PENALIZAR a los generalistas y FAVORECER claramente a los especialistas exactos. Un mentor que no mencione EXPLÍCITAMENTE la habilidad buscada por el mentee NO DEBE recibir más de 50 puntos en relevancia temática, sin importar sus otras cualidades.
+          
+          Por ejemplo: Si el mentee busca "mejorar la comunicación" y el mentor se presenta claramente como "especialista en comunicación efectiva", debe recibir >60 puntos en relevancia. Un mentor que solo menciona "ayudo a profesionales a crecer" debe recibir <30 puntos en relevancia.`
         },
         { 
           role: "user", 
@@ -143,14 +151,15 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
           
           Responde con un JSON con este formato exacto:
           {
-            "relevancia_tematica": (0-50),
-            "experiencia_general": (0-30),
-            "enfoque_mentoria": (0-20),
-            "puntuacion_total": (suma de los tres componentes)
+            "relevancia_tematica": (0-70),
+            "experiencia_general": (0-20),
+            "enfoque_mentoria": (0-10),
+            "puntuacion_total": (suma de los tres componentes),
+            "razon_puntuacion": "Breve explicación (1-2 frases) de por qué recibió esta puntuación"
           }`
         }
       ],
-      temperature: 0.3,
+      temperature: 0.2, // Reducir temperatura para obtener respuestas más consistentes
       response_format: { type: "json_object" },
     });
 
@@ -158,9 +167,7 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
     const result = JSON.parse(compatibilityResponse.choices[0].message.content);
     const score = result.puntuacion_total;
     
-    // Ya no necesitamos generar explicaciones detalladas
-    // La eliminamos para optimizar la llamada a la API
-
+    // Añadir explicación a resultados
     return {
       mentor: normalizedMentor,
       score,
@@ -168,7 +175,8 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
         relevance: result.relevancia_tematica,
         experience: result.experiencia_general,
         approach: result.enfoque_mentoria
-      }
+      },
+      explanation: result.razon_puntuacion
     };
   } catch (error) {
     console.error(`Error evaluando mentor ${mentor.name}:`, error);
