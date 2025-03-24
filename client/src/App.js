@@ -165,7 +165,8 @@ function App() {
         console.log("Enviando al servidor batch con primer mentor:", 
                     JSON.stringify(currentBatch[0]));
         
-        const response = await fetch('http://localhost:5002/api/match', {
+        const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5002';
+        const response = await fetch(`${API_URL}/api/match`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

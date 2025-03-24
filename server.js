@@ -54,13 +54,13 @@ let pLimit;
 })();
 
 const app = express();
-const port = 5002;
+const port = process.env.PORT || 5002;
 
 // Middleware - aumentar límites de tamaño de solicitud
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? '*' 
-    : `http://localhost:${process.env.REACT_APP_PORT || 3000}`
+    ? ['https://tu-dominio-real.netlify.app'] 
+    : 'http://localhost:3000'
 }));
 
 // Aumentar significativamente los límites de tamaño

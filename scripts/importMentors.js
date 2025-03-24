@@ -1,10 +1,14 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
+// Modificar para leer URL de entorno
+const supabaseUrl = process.env.SUPABASE_URL || "https://chbnzgqeuvfbhsbupuin.supabase.co";
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY || "clave-secreta";
+
 // Inicializar cliente Supabase
 const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY
+  supabaseUrl,
+  supabaseKey
 );
 
 // Datos de mentores que quieres importar
@@ -72,6 +76,17 @@ async function importMentors() {
     console.log('Importación completada con éxito');
   } catch (error) {
     console.error('Error en la importación:', error);
+  }
+}
+
+// Añadir instrucciones para ejecutar en producción
+if (require.main === module) {
+  if (process.env.NODE_ENV === 'production') {
+    console.log('Ejecutando importación en producción...');
+    // Lógica para producción
+  } else {
+    console.log('Ejecutando importación en desarrollo...');
+    // Lógica para desarrollo
   }
 }
 
