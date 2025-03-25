@@ -118,6 +118,8 @@ function App() {
     total: 0,
     processed: 0
   });
+  const [isSearching, setIsSearching] = useState(false);
+  const [abortController, setAbortController] = useState(null);
 
   // Verificar conexión a Supabase al cargar
   useEffect(() => {
@@ -146,54 +148,65 @@ function App() {
     checkSupabase();
   }, []);
 
-  const processMentorsSequentially = async (allMentors) => {
+  const processMentorsSequentially = async (allMentors, signal) => {
     const BATCH_SIZE = 15;
     let processedResults = [];
     
     try {
       for (let i = 0; i < allMentors.length; i += BATCH_SIZE) {
+        // Verificar si la búsqueda fue cancelada
+        if (signal && signal.aborted) {
+          throw new DOMException('Búsqueda cancelada por el usuario', 'AbortError');
+        }
+        
         const currentBatch = allMentors.slice(i, i + BATCH_SIZE);
         
-        // Actualizar progreso al inicio de cada lote
+        // Actualizar progreso
         setProgress({
-          current: Math.floor(i / BATCH_SIZE) + 1,
+          current: i,
           total: allMentors.length,
-          processed: processedResults.length
+          processed: i
         });
         
-        // Imprimir explícitamente los datos que se están enviando
-        console.log("Enviando al servidor batch con primer mentor:", 
-                    JSON.stringify(currentBatch[0]));
-        
-        const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5002';
-        const response = await fetch(`${API_URL}/api/match`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            mentee: menteeInfo,
-            // Enviar los datos sin normalizar para preservar todos los campos originales
-            mentors: currentBatch 
-          }),
-        });
-        
-        if (!response.ok) throw new Error(response.statusText);
-        
-        const data = await response.json();
-        
-        // Solución segura para el error no-loop-func
-        // eslint-disable-next-line no-loop-func
-        processedResults = [...processedResults, ...data.matches].sort((a, b) => b.score - a.score);
-        
-        // Actualizar resultados ordenados
-        setResults(processedResults);
-        
-        // Actualizar progreso después de procesar cada lote
-        setProgress(prev => ({
-          ...prev,
-          processed: processedResults.length
-        }));
-        
-        console.log(`Lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(allMentors.length / BATCH_SIZE)} completado, total matches: ${processedResults.length}`);
+        try {
+          const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5002';
+          const response = await fetch(`${API_URL}/api/match`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              mentee: menteeInfo,
+              mentors: currentBatch
+            }),
+            signal: signal  // Pasar la señal a fetch
+          });
+          
+          if (!response.ok) throw new Error(response.statusText);
+          
+          const data = await response.json();
+          
+          // Solución segura para el error no-loop-func
+          // eslint-disable-next-line no-loop-func
+          processedResults = [...processedResults, ...data.matches].sort((a, b) => b.score - a.score);
+          
+          // Actualizar resultados ordenados
+          setResults(processedResults);
+          
+          // Actualizar progreso después de procesar cada lote
+          setProgress(prev => ({
+            ...prev,
+            processed: processedResults.length
+          }));
+          
+          console.log(`Lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(allMentors.length / BATCH_SIZE)} completado, total matches: ${processedResults.length}`);
+        } catch (error) {
+          // Propagar el error de cancelación
+          if (error.name === 'AbortError') {
+            throw error;
+          }
+          // Otros errores...
+        }
       }
       
       // Ordenación final para asegurar que todo esté en orden correcto
@@ -202,19 +215,18 @@ function App() {
       
       return sortedResults;
     } catch (error) {
-      throw error;
+      // Propagar el error de cancelación
+      if (error.name === 'AbortError') {
+        throw error;
+      }
+      // Otros errores...
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!menteeInfo.name || !menteeInfo.lookingFor) {
-      setError('Por favor completa todos los campos');
-      return;
-    }
-    
     setLoading(true);
+    setIsSearching(true);
     setError(null);
     setResults([]);
     setProgress({ 
@@ -222,6 +234,10 @@ function App() {
       total: 0,
       processed: 0
     });
+
+    // Crear un nuevo AbortController para esta búsqueda
+    const controller = new AbortController();
+    setAbortController(controller);
 
     try {
       let allMentors = [];
@@ -240,28 +256,39 @@ function App() {
         if (!supabaseMentors || supabaseMentors.length === 0) {
           setError('No se encontraron mentores en la base de datos');
           setLoading(false);
+          setIsSearching(false);
           return;
         }
         
-        // IMPORTANTE: Enviar los datos originales sin normalizar
         allMentors = supabaseMentors;
-        console.log("Primeros 3 mentores de Supabase:", 
-                    supabaseMentors.slice(0, 3).map(m => ({
-                      mentor_id: m.mentor_id, 
-                      first_name: m.first_name,
-                      current_title: m.current_title
-                    })));
       }
       
       console.log(`Total de ${allMentors.length} mentores disponibles`);
       
-      // Usar la nueva función que procesa todos los mentores en secuencia
-      await processMentorsSequentially(allMentors);
+      // Pasar el signal del AbortController a la petición
+      await processMentorsSequentially(allMentors, controller.signal);
+      
       setLoading(false);
+      setIsSearching(false);
     } catch (err) {
-      console.error('Error durante el matching:', err);
-      setError('Error: ' + err.message);
+      // Verificar si el error fue por cancelación
+      if (err.name === 'AbortError') {
+        console.log('Búsqueda cancelada por el usuario');
+        setError('Búsqueda cancelada');
+      } else {
+        console.error('Error durante el matching:', err);
+        setError('Error: ' + err.message);
+      }
       setLoading(false);
+      setIsSearching(false);
+    }
+  };
+
+  // Función para cancelar la búsqueda
+  const handleCancelSearch = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
     }
   };
 
@@ -281,8 +308,8 @@ function App() {
       </header>
       
       <main>
-        <div className="form-container">
-          <h2>Encuentra tu mentor ideal</h2>
+        <div className="mentor-search-form">
+          <h1>Encuentra tu mentor ideal</h1>
           
           <form onSubmit={handleSubmit}>
             <div className="form-group">
@@ -292,7 +319,7 @@ function App() {
                 type="text"
                 value={menteeInfo.name}
                 onChange={(e) => setMenteeInfo({...menteeInfo, name: e.target.value})}
-                placeholder="Ingresa tu nombre completo"
+                placeholder="Escribe tu nombre"
               />
             </div>
             
@@ -302,11 +329,12 @@ function App() {
                 id="lookingFor"
                 value={menteeInfo.lookingFor}
                 onChange={(e) => setMenteeInfo({...menteeInfo, lookingFor: e.target.value})}
-                placeholder="Describe tus objetivos, intereses y qué esperas de un mentor..."
+                placeholder="Describe lo que te gustaría conseguir"
+                rows={4}
               />
             </div>
             
-            <button type="submit" disabled={loading}>
+            <button type="submit" className="search-button" disabled={loading}>
               {loading ? 'Buscando mentores...' : 'Encontrar Mentores'}
             </button>
           </form>
@@ -315,29 +343,37 @@ function App() {
         </div>
         
         {loading && (
-          <div className="loading">
-            <p>Evaluando compatibilidad con mentores...</p>
-            {progress.total > 0 && (
-              <>
-                <div className="progress-container">
-                  <div 
-                    className="progress-bar" 
-                    style={{
-                      width: `${Math.min(Math.round((progress.processed / progress.total) * 100), 100)}%`
-                    }}
-                  >
-                    <span className="progress-text">
-                      {Math.min(Math.round((progress.processed / progress.total) * 100), 100)}%
-                    </span>
-                  </div>
-                </div>
-                <p className="progress-stats">
-                  Mentores procesados: {progress.processed} de {progress.total}
-                  <br />
-                  {progress.processed < progress.total ? 'Procesando...' : 'Completado'}
-                </p>
-              </>
-            )}
+          <div className="progress-floating">
+            <div className="header-row">
+              <h4>
+                Evaluando compatibilidad
+                <span className="percentage-badge">
+                  {Math.min(Math.round((progress.processed / progress.total) * 100), 100)}%
+                </span>
+              </h4>
+            </div>
+            
+            <div className="content-row">
+              <div className="progress-container">
+                <div 
+                  className="progress-bar" 
+                  style={{
+                    width: `${Math.min(Math.round((progress.processed / progress.total) * 100), 100)}%`
+                  }}
+                />
+              </div>
+              
+              <div className="progress-stats">
+                {progress.processed} de {progress.total} mentores
+              </div>
+              
+              <button 
+                className="cancel-button" 
+                onClick={handleCancelSearch}
+              >
+                Detener búsqueda
+              </button>
+            </div>
           </div>
         )}
         
@@ -359,32 +395,9 @@ function App() {
                     <p>{match.mentor.bio}</p>
                   </div>
                   
-                  {/* Componentes de puntuación */}
-                  {match.components && (
-                    <div className="score-components">
-                      <div className="component">
-                        <span className="component-name">Relevancia temática:</span>
-                        <div className="component-bar">
-                          <div className="component-fill" style={{width: `${match.components.relevance * 2}%`}}></div>
-                        </div>
-                        <span className="component-value">{match.components.relevance}/50</span>
-                      </div>
-                      <div className="component">
-                        <span className="component-name">Experiencia:</span>
-                        <div className="component-bar">
-                          <div className="component-fill" style={{width: `${match.components.experience * 3.33}%`}}></div>
-                        </div>
-                        <span className="component-value">{match.components.experience}/30</span>
-                      </div>
-                      <div className="component">
-                        <span className="component-name">Enfoque de mentoría:</span>
-                        <div className="component-bar">
-                          <div className="component-fill" style={{width: `${match.components.approach * 5}%`}}></div>
-                        </div>
-                        <span className="component-value">{match.components.approach}/20</span>
-                      </div>
-                    </div>
-                  )}
+                  <div className="match-score">
+                    Match: {match.score}%
+                  </div>
                 </div>
               ))}
             </div>

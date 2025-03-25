@@ -86,102 +86,113 @@ app.get('/api/test', (req, res) => {
 // Función para evaluar un mentor con puntuación por componentes - versión optimizada
 const evaluateMentor = async (mentor, mentee, requestId) => {
   try {
-    // Loguear datos originales para diagnóstico
-    console.log(`[DEBUG] Datos originales del mentor:`, {
-      id: mentor.id || mentor.mentor_id,
-      name: mentor.name,
-      first_name: mentor.first_name,
-      last_name: mentor.last_name,
-      title: mentor.title,
-      current_title: mentor.current_title,
-      company: mentor.company,
-      bio: mentor.bio?.substring(0, 50) + '...'
-    });
-    
-    // Asegurarnos que estamos normalizando los campos del mentor antes de usarlos
+    // Primero normalizar el mentor
     const normalizedMentor = {
       id: mentor.id || mentor.mentor_id || mentor.userId || `temp-${Date.now()}`,
       name: mentor.name || 
             (mentor.first_name && mentor.last_name ? `${mentor.first_name} ${mentor.last_name}` : null) || 
             mentor.full_name || 
             'Sin nombre',
-      title: mentor.current_title || mentor.title || mentor.role || mentor.position || mentor.cargo || mentor.puesto || 'No especificado',
-      company: mentor.company || mentor.current_company || mentor.organization || mentor.empresa || 'No especificada',
-      bio: extractBio(mentor)
+      // Asegurarnos de que current_title tiene prioridad
+      title: mentor.current_title || mentor.title || mentor.role || mentor.position || 'No especificado',
+      company: mentor.company || mentor.current_company || mentor.organization || 'No especificada',
+      bio: extractBio(mentor),
+      // Añadir el current_title explícitamente
+      current_title: mentor.current_title
     };
+
+    // Debug log
+    console.log(`
+    ========= DEBUG MATCH [${requestId}] =========
+    MENTEE BUSCA: "${mentee.lookingFor}"
+    MENTOR BIO: "${normalizedMentor.bio}"
+    =======================================
+    `);
     
-    // Loguear datos normalizados para diagnóstico
-    console.log(`[DEBUG] Datos normalizados:`, normalizedMentor);
+    // VERIFICACIÓN DE COINCIDENCIA EXACTA
+    // Si el texto del mentee es idéntico al texto del mentor, asignar 100% directamente
+    const menteeText = mentee.lookingFor?.trim().toLowerCase();
+    const mentorText = normalizedMentor.bio?.trim().toLowerCase();
     
-    // Sistema de prompt mejorado con criterios ESTRICTOS y CONOCIMIENTO DE LA INDUSTRIA
+    if (menteeText && mentorText && menteeText === mentorText) {
+      console.log(`✅ [${requestId}] COINCIDENCIA EXACTA DETECTADA - ASIGNANDO 100%`);
+      
+      return {
+        mentor: normalizedMentor,
+        score: 100,
+        explanation: "Coincidencia exacta: El texto del mentee es idéntico al del mentor."
+      };
+    }
+    
+    // Si no hay coincidencia exacta, continuar con la evaluación normal
     const compatibilityResponse = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         { 
           role: "system", 
-          content: `Eres un experto en matching de mentores y mentees con criterios MUY ESTRICTOS y CONOCIMIENTO DE LA INDUSTRIA.
+          content: `Eres un experto en matching de competencias entre mentores y mentees.
 
-1. RELEVANCIA TEMÁTICA (0-70 puntos): 
-   - PASO 1: IDENTIFICA EXACTAMENTE lo que busca el mentee en sus propias palabras.
-   - PASO 2: Evalúa si el mentor tiene experiencia DIRECTA en esas áreas ESPECÍFICAS.
+ANÁLISIS DETALLADO DE NECESIDADES:
+1. Identifica ESPECÍFICAMENTE lo que busca el mentee (industrias, habilidades, experiencias concretas)
+2. Evalúa CADA UNO de esos elementos en el perfil del mentor
+3. Asigna puntuación basada en CUÁNTOS elementos específicos coinciden
 
-   CONOCIMIENTO DE TERMINOLOGÍA:
-   - Conoces términos como "MBB" (McKinsey, BCG, Bain), "FAANG" (Facebook/Meta, Apple, Amazon, Netflix, Google), "IB" (Investment Banking)
-   - Usa este conocimiento SÓLO cuando sea relevante para la búsqueda específica del mentee
+PONDERACIÓN DE CRITERIOS (muy importante):
+- Las coincidencias en áreas específicas (industrias, roles) tienen MÁS PESO que habilidades generales
+- Experiencia DIRECTA en lo que busca el mentee vale más que habilidades transferibles
+- Experiencia ESPECÍFICA en industrias mencionadas vale más que experiencia general
 
-   Ejemplos de puntuación:
-   - Si mentee busca "desarrollo profesional y comunicación" y el mentor es experto en comunicación = 60-70 puntos
-   - Si mentee busca "trabajo en MBB" y mentor trabajó en BCG = 60-70 puntos
-   - Si mentee busca "desarrollo profesional" y mentor trabajó en McKinsey pero no menciona desarrollo = 20-30 puntos
-   
-2. EXPERIENCIA GENERAL (0-20 puntos): Experiencia profesional verificable.
+RANGOS DE PUNTUACIÓN ESTRICTOS:
+80-100: ALTA coincidencia en áreas ESPECÍFICAS (industrias, experiencia concreta solicitada)
+60-79: Coincidencia MODERADA (algunas áreas específicas, otras transferibles)
+40-59: Coincidencia PARCIAL (principalmente habilidades transferibles)
+20-39: Coincidencia BAJA (pocas habilidades transferibles)
+0-19: Sin coincidencia relevante
 
-3. ENFOQUE DE MENTORÍA (0-10 puntos): Estilo y metodología de mentoría.
-
-IMPORTANTE: La relevancia temática SOLO debe ser alta cuando hay coincidencia DIRECTA con lo que el mentee EXPLÍCITAMENTE busca. Las empresas prestigiosas son relevantes SÓLO si corresponden a lo que busca el mentee específicamente.`
+Responde con un JSON con este formato exacto:
+{
+  "puntuacion": (0-100),
+  "coincidencias_especificas": ["lista de coincidencias específicas"],
+  "coincidencias_transferibles": ["lista de habilidades transferibles"],
+  "elementos_no_cubiertos": ["elementos importantes que el mentor no cubre"],
+  "razon": "Explicación detallada de la puntuación"
+}`
         },
         { 
           role: "user", 
-          content: `Evalúa la compatibilidad entre este mentor y mentee usando el sistema de componentes:
-          
-          MENTOR:
-          Nombre: ${normalizedMentor.name}
-          Cargo: ${normalizedMentor.title}
-          Empresa: ${normalizedMentor.company}
-          Biografía: ${normalizedMentor.bio}
-          
-          MENTEE:
-          Nombre: ${mentee.name}
-          Busca: ${mentee.lookingFor}
-          
-          Responde con un JSON con este formato exacto:
-          {
-            "relevancia_tematica": (0-70),
-            "experiencia_general": (0-20),
-            "enfoque_mentoria": (0-10),
-            "puntuacion_total": (suma de los tres componentes),
-            "razon_puntuacion": "Breve explicación (1-2 frases) de por qué recibió esta puntuación"
-          }`
+          content: `Evalúa la compatibilidad entre este mentor y mentee:
+
+NECESIDAD DEL MENTEE (texto exacto):
+${mentee.lookingFor}
+
+PERFIL DEL MENTOR (texto exacto):
+Cargo: ${normalizedMentor.title}
+Biografía: ${normalizedMentor.bio}
+
+INSTRUCCIÓN CRÍTICA:
+- PRIMERO compara si hay TEXTO IDÉNTICO entre lo que busca el mentee y la bio del mentor
+- Si encuentras segmentos de texto idénticos o muy similares → ASIGNA 100%
+- De lo contrario, realiza el análisis semántico normal
+
+Responde con un JSON con este formato exacto:
+{
+  "puntuacion": (0-100),
+  "razon": "Explicación detallada que justifique esta puntuación, mencionando EXPLÍCITAMENTE si detectaste coincidencia textual"
+}`
         }
       ],
-      temperature: 0.2, // Reducir temperatura para obtener respuestas más consistentes
-      response_format: { type: "json_object" },
+      temperature: 0.3, // Permitir más flexibilidad para análisis semántico
     });
 
     // Analizar la respuesta JSON
     const result = JSON.parse(compatibilityResponse.choices[0].message.content);
-    const score = result.puntuacion_total;
+    const score = result.puntuacion;
     
     // Añadir explicación a resultados
     return {
       mentor: normalizedMentor,
-      score,
-      components: {
-        relevance: result.relevancia_tematica,
-        experience: result.experiencia_general,
-        approach: result.enfoque_mentoria
-      },
-      explanation: result.razon_puntuacion
+      score: result.puntuacion,
+      explanation: result.razon
     };
   } catch (error) {
     console.error(`Error evaluando mentor ${mentor.name}:`, error);
