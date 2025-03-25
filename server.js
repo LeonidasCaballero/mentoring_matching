@@ -130,55 +130,62 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
       messages: [
         { 
           role: "system", 
-          content: `Eres un experto en matching de competencias entre mentores y mentees.
+          content: `Eres un evaluador EXTREMADAMENTE EXIGENTE de compatibilidad entre mentores y mentees.
 
-ANÁLISIS DETALLADO DE NECESIDADES:
-1. Identifica ESPECÍFICAMENTE lo que busca el mentee (industrias, habilidades, experiencias concretas)
-2. Evalúa CADA UNO de esos elementos en el perfil del mentor
-3. Asigna puntuación basada en CUÁNTOS elementos específicos coinciden
+CRITERIO PRIMARIO:
+- Si el TÍTULO o CARGO del mentor contiene las PALABRAS CLAVE que busca el mentee → AUTOMÁTICAMENTE puntuación BASE DE 80-90
+- Si la BIO del mentor contiene EXPERIENCIA DIRECTA en lo que busca el mentee → AUTOMÁTICAMENTE puntuación BASE DE 70-80
 
-PONDERACIÓN DE CRITERIOS (muy importante):
-- Las coincidencias en áreas específicas (industrias, roles) tienen MÁS PESO que habilidades generales
-- Experiencia DIRECTA en lo que busca el mentee vale más que habilidades transferibles
-- Experiencia ESPECÍFICA en industrias mencionadas vale más que experiencia general
+SISTEMA DE PUNTUACIÓN:
+1. PALABRAS CLAVE CRÍTICAS:
+   - Identifica 1-3 PALABRAS CLAVE CRÍTICAS en la búsqueda del mentee
+   - Si estas aparecen en el CARGO o TÍTULO del mentor → +30 puntos
+   - Si estas aparecen en la BIO del mentor de manera prominente → +20 puntos
+   - EJEMPLO: Mentee busca "comunicación" y mentor es "Head of Communications" → ALTA COINCIDENCIA
 
-RANGOS DE PUNTUACIÓN ESTRICTOS:
-80-100: ALTA coincidencia en áreas ESPECÍFICAS (industrias, experiencia concreta solicitada)
-60-79: Coincidencia MODERADA (algunas áreas específicas, otras transferibles)
-40-59: Coincidencia PARCIAL (principalmente habilidades transferibles)
-20-39: Coincidencia BAJA (pocas habilidades transferibles)
-0-19: Sin coincidencia relevante
+2. ANÁLISIS DE EXPERIENCIA DIRECTA:
+   - Si el mentor tiene experiencia DIRECTA y ESPECÍFICA → +40 puntos
+   - Si el mentor solo tiene habilidades transferibles → máximo 50 puntos totales
+
+3. PENALIZACIONES OBLIGATORIAS:
+   - Si el TÍTULO no contiene ninguna palabra clave relacionada → -20 puntos
+   - Si la BIO no menciona experiencia directa → -30 puntos
+
+REGLAS ABSOLUTAS:
+1. CARGO "COMMUNICATIONS" para mentee buscando "communicator" → MÍNIMO 80 puntos
+2. EXPERIENCIA DIRECTA en la habilidad solicitada → MÍNIMO 70 puntos
+3. NUNCA más de 40 puntos si no hay experiencia directa visible
+4. Si la BIO menciona ESPECÍFICAMENTE la habilidad buscada → +30 puntos
 
 Responde con un JSON con este formato exacto:
 {
-  "puntuacion": (0-100),
-  "coincidencias_especificas": ["lista de coincidencias específicas"],
-  "coincidencias_transferibles": ["lista de habilidades transferibles"],
-  "elementos_no_cubiertos": ["elementos importantes que el mentor no cubre"],
-  "razon": "Explicación detallada de la puntuación"
+  "palabras_clave": ["palabras clave identificadas"],
+  "coincidencia_titulo": "alta/media/baja",
+  "coincidencia_bio": "alta/media/baja",
+  "puntuacion_final": n,
+  "analisis": "Explicación detallada que DEBE mencionar si las palabras clave aparecen en el título y bio"
 }`
         },
         { 
           role: "user", 
-          content: `Evalúa la compatibilidad entre este mentor y mentee:
+          content: `Evalúa con MÁXIMA PRECISIÓN la compatibilidad entre este mentor y mentee:
 
-NECESIDAD DEL MENTEE (texto exacto):
-${mentee.lookingFor}
+NECESIDAD DEL MENTEE:
+"${mentee.lookingFor}"
 
-PERFIL DEL MENTOR (texto exacto):
-Cargo: ${normalizedMentor.title}
-Biografía: ${normalizedMentor.bio}
+PERFIL DEL MENTOR:
+TÍTULO/CARGO: "${normalizedMentor.title}"
+EMPRESA: "${normalizedMentor.company}"
+BIO COMPLETA: "${normalizedMentor.bio}"
 
-INSTRUCCIÓN CRÍTICA:
-- PRIMERO compara si hay TEXTO IDÉNTICO entre lo que busca el mentee y la bio del mentor
-- Si encuentras segmentos de texto idénticos o muy similares → ASIGNA 100%
-- De lo contrario, realiza el análisis semántico normal
+REGLA CRÍTICA DE EVALUACIÓN:
+- Si el TÍTULO del mentor contiene las PALABRAS CLAVE que busca el mentee → DEBE tener alta puntuación
+- EJEMPLO: Mentee busca "communication" y mentor es "Head of Communications" → MÍNIMO 80 puntos
+- EJEMPLO: Mentee busca "leadership" y mentor menciona "leadership" en su bio → MÍNIMO 70 puntos
 
-Responde con un JSON con este formato exacto:
-{
-  "puntuacion": (0-100),
-  "razon": "Explicación detallada que justifique esta puntuación, mencionando EXPLÍCITAMENTE si detectaste coincidencia textual"
-}`
+Evalúa primero el TÍTULO/CARGO, luego la BIO, y determina la relevancia DIRECTA.
+No sobrevalores habilidades transferibles o generales.
+Responde con el JSON requerido.`
         }
       ],
       temperature: 0.3, // Permitir más flexibilidad para análisis semántico
@@ -186,13 +193,13 @@ Responde con un JSON con este formato exacto:
 
     // Analizar la respuesta JSON
     const result = JSON.parse(compatibilityResponse.choices[0].message.content);
-    const score = result.puntuacion;
+    const score = result.puntuacion_final;
     
     // Añadir explicación a resultados
     return {
       mentor: normalizedMentor,
-      score: result.puntuacion,
-      explanation: result.razon
+      score: result.puntuacion_final,
+      explanation: result.analisis
     };
   } catch (error) {
     console.error(`Error evaluando mentor ${mentor.name}:`, error);
