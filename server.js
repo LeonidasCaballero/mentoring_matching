@@ -5,6 +5,7 @@ require('dotenv').config();
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
+const { createClient } = require('@supabase/supabase-js');
 
 // Flag para activar logs detallados: export DEBUG_LOGS=true
 const DEBUG = process.env.DEBUG_LOGS === 'true';
@@ -75,6 +76,11 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+// Supabase admin client (read-only fields)
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 // ================= EMBEDDINGS SETUP =================
 let mentorEmbeddings = new Map();
@@ -304,11 +310,29 @@ function createLimiter(maxConcurrent) {
 app.post('/api/match', async (req, res) => {
   try {
     const requestId = uuidv4().slice(0, 8);
-    const { mentee, mentors, model } = req.body;
+    const { mentee, mentors: incomingMentors, model } = req.body;
     const modelName = model || "gpt-3.5-turbo";
     
-    if (!mentee || !mentors || !Array.isArray(mentors)) {
-      return res.status(400).json({ error: 'Datos incompletos' });
+    let mentors = incomingMentors;
+
+    if (!mentee) {
+      return res.status(400).json({ error: 'Falta información del mentee' });
+    }
+
+    // cargar mentores si no llegaron (opción móvil)
+    if ((!mentors || mentors.length === 0) && supabase) {
+      const { data, error } = await supabase
+        .from('mentors')
+        .select('id, first_name, last_name, description, is_available');
+      if (error) {
+        console.error('Error cargando mentores desde Supabase:', error.message);
+        return res.status(500).json({ error: 'No se pudieron obtener mentores' });
+      }
+      mentors = data;
+    }
+
+    if (!mentors || !Array.isArray(mentors) || mentors.length === 0) {
+      return res.status(400).json({ error: 'No se proporcionaron mentores' });
     }
     
     // Conservar todos los datos originales sin modificarlos
