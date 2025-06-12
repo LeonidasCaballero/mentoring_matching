@@ -171,7 +171,7 @@ function App() {
 
   const processMentorsOnce = async (allMentors, signal, model) => {
     try {
-      const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5002';
+      const API_URL = (process.env.REACT_APP_API_URL || 'http://localhost:5002').replace(/\/$/, '');
       const response = await fetch(`${API_URL}/api/match`, {
         method: 'POST',
         headers: {
