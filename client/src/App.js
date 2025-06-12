@@ -58,6 +58,7 @@ const FALLBACK_MENTORS = [
 ];
 
 // Función para normalizar los datos de mentores
+// eslint-disable-next-line no-unused-vars
 const normalizeMentorData = (mentor) => {
   // Normalización de mentor
   
@@ -120,15 +121,19 @@ function App() {
   const [error, setError] = useState(null);
   // eslint-disable-next-line no-unused-vars
   const [mentors, setMentors] = useState([]);
+  // eslint-disable-next-line no-unused-vars
   const [supabaseStatus, setSupabaseStatus] = useState('Verificando...');
   // eslint-disable-next-line no-unused-vars
   const [availableMentors, setAvailableMentors] = useState([]);
+  // eslint-disable-next-line no-unused-vars
   const MENTORS_PER_PAGE = 15;
+  // eslint-disable-next-line no-unused-vars
   const [progress, setProgress] = useState({ 
     current: 0, 
     total: 0,
     processed: 0
   });
+  // eslint-disable-next-line no-unused-vars
   const [isSearching, setIsSearching] = useState(false);
   const [abortController, setAbortController] = useState(null);
   // Usamos un modelo fijo de OpenAI
