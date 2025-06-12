@@ -174,7 +174,7 @@ function App() {
         },
         body: JSON.stringify({
           mentee: menteeInfo,
-          mentors: allMentors,
+          mentors: [],
           model
         }),
         signal
