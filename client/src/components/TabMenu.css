@@ -1,0 +1,49 @@
+.navbar {
+  background-color: #ffffff;
+  border-bottom: 1px solid #eaeaea;
+  padding: 15px 0;
+  width: 100%;
+  position: relative;
+  z-index: 1000;
+  display: block !important;
+  visibility: visible !important;
+}
+
+.navbar-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--notion-black);
+}
+
+.nav-tabs {
+  display: flex;
+  gap: 10px;
+}
+
+.nav-tab {
+  color: var(--notion-gray);
+  text-decoration: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.nav-tab:hover {
+  background-color: #f5f5f5;
+}
+
+.nav-tab.active {
+  color: var(--notion-blue);
+  background-color: #f0f7ff;
+  font-weight: 600;
+} 

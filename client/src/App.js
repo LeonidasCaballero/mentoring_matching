@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import { createClient } from '@supabase/supabase-js';
+import confetti from 'canvas-confetti';
+
+// Silenciar logs en producción para evitar ruido en la consola del navegador
+if (process.env.NODE_ENV !== 'development') {
+  // eslint-disable-next-line no-console
+  console.log = () => {};
+}
 
 // Variables de Supabase (para desarrollo solamente)
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || "https://chbnzgqeuvfbhsbupuin.supabase.co";
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoYm56Z3FldXZmYmhzYnVwdWluIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI4MTAzODAsImV4cCI6MjA1ODM4NjM4MH0.OCNQQ53wO_za2oJTKPl5TYWZWIhnSnZx4qE-t42cZV4";
-
-// Verificar si las variables están definidas
-console.log("Supabase URL:", supabaseUrl);
-console.log("Supabase Key:", supabaseAnonKey ? "Definida (oculta)" : "No definida");
 
 // Crear cliente solo si las credenciales están disponibles
 const supabase = supabaseUrl && supabaseAnonKey 
@@ -56,8 +59,7 @@ const FALLBACK_MENTORS = [
 
 // Función para normalizar los datos de mentores
 const normalizeMentorData = (mentor) => {
-  // Extraer campos principales primero para depurar
-  console.log("Normalizando mentor con datos crudos:", mentor);
+  // Normalización de mentor
   
   // Intentar encontrar el nombre en varias propiedades posibles
   let name = mentor.name || mentor.nombre || mentor.full_name || mentor.fullName;
@@ -99,6 +101,15 @@ const normalizeMentorData = (mentor) => {
   };
 };
 
+// Helper to format name: Firstname + first letter of last name
+const formatName = (fullName = '') => {
+  const parts = fullName.trim().split(' ').filter(Boolean);
+  if (parts.length === 0) return '';
+  const first = parts[0];
+  const lastInitial = parts.length > 1 ? `${parts[parts.length - 1][0].toUpperCase()}.` : '';
+  return `${first}${lastInitial ? ' ' + lastInitial : ''}`;
+};
+
 function App() {
   const [menteeInfo, setMenteeInfo] = useState({
     name: '',
@@ -120,6 +131,9 @@ function App() {
   });
   const [isSearching, setIsSearching] = useState(false);
   const [abortController, setAbortController] = useState(null);
+  // Usamos un modelo fijo de OpenAI
+  const selectedModel = 'gpt-3.5-turbo';
+  const [confettiFired, setConfettiFired] = useState(false);
 
   // Verificar conexión a Supabase al cargar
   useEffect(() => {
@@ -131,16 +145,18 @@ function App() {
       
       try {
         setSupabaseStatus('Conectando...');
-        const { data: supabaseMentors, error: fetchError } = await supabase.from('mentors').select('*');
+        const { data: supabaseMentors, error: fetchError } = await supabase
+          .from('mentors')
+          .select('id, first_name, last_name, description, is_available');
         
         if (fetchError) {
-          console.error('Error Supabase:', fetchError);
+          // console error optional
           setSupabaseStatus(`Error: ${fetchError.message} - usando datos de ejemplo`);
         } else {
           setSupabaseStatus(`Conectado ✅ (${supabaseMentors.length} mentores disponibles)`);
         }
       } catch (err) {
-        console.error('Error al conectar con Supabase:', err);
+        // console error optional
         setSupabaseStatus(`Error de conexión: ${err.message} - usando datos de ejemplo`);
       }
     }
@@ -148,78 +164,30 @@ function App() {
     checkSupabase();
   }, []);
 
-  const processMentorsSequentially = async (allMentors, signal) => {
-    const BATCH_SIZE = 15;
-    let processedResults = [];
-    
+  const processMentorsOnce = async (allMentors, signal, model) => {
     try {
-      for (let i = 0; i < allMentors.length; i += BATCH_SIZE) {
-        // Verificar si la búsqueda fue cancelada
-        if (signal && signal.aborted) {
-          throw new DOMException('Búsqueda cancelada por el usuario', 'AbortError');
-        }
-        
-        const currentBatch = allMentors.slice(i, i + BATCH_SIZE);
-        
-        // Actualizar progreso
-        setProgress({
-          current: i,
-          total: allMentors.length,
-          processed: i
-        });
-        
-        try {
-          const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5002';
-          const response = await fetch(`${API_URL}/api/match`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              mentee: menteeInfo,
-              mentors: currentBatch
-            }),
-            signal: signal  // Pasar la señal a fetch
-          });
-          
-          if (!response.ok) throw new Error(response.statusText);
-          
-          const data = await response.json();
-          
-          // Solución segura para el error no-loop-func
-          // eslint-disable-next-line no-loop-func
-          processedResults = [...processedResults, ...data.matches].sort((a, b) => b.score - a.score);
-          
-          // Actualizar resultados ordenados
-          setResults(processedResults);
-          
-          // Actualizar progreso después de procesar cada lote
-          setProgress(prev => ({
-            ...prev,
-            processed: processedResults.length
-          }));
-          
-          console.log(`Lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(allMentors.length / BATCH_SIZE)} completado, total matches: ${processedResults.length}`);
-        } catch (error) {
-          // Propagar el error de cancelación
-          if (error.name === 'AbortError') {
-            throw error;
-          }
-          // Otros errores...
-        }
-      }
-      
-      // Ordenación final para asegurar que todo esté en orden correcto
-      const sortedResults = [...processedResults].sort((a, b) => b.score - a.score);
-      setResults(sortedResults);
-      
-      return sortedResults;
+      const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5002';
+      const response = await fetch(`${API_URL}/api/match`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mentee: menteeInfo,
+          mentors: allMentors,
+          model
+        }),
+        signal
+      });
+
+      if (!response.ok) throw new Error(response.statusText);
+
+      const data = await response.json();
+      setResults(data.matches.sort((a, b) => b.score - a.score));
+
+      return data.matches;
     } catch (error) {
-      // Propagar el error de cancelación
-      if (error.name === 'AbortError') {
-        throw error;
-      }
-      // Otros errores...
+      if (error.name === 'AbortError') throw error;
     }
   };
 
@@ -247,7 +215,9 @@ function App() {
         allMentors = FALLBACK_MENTORS;
       } else {
         // Obtener mentores de Supabase
-        const { data: supabaseMentors, error: fetchError } = await supabase.from('mentors').select('*');
+        const { data: supabaseMentors, error: fetchError } = await supabase
+          .from('mentors')
+          .select('id, first_name, last_name, description, is_available');
         
         if (fetchError) {
           throw new Error('Error cargando mentores: ' + fetchError.message);
@@ -260,23 +230,22 @@ function App() {
           return;
         }
         
-        allMentors = supabaseMentors;
+        // Eliminar cualquier email u otra información sensible
+        allMentors = supabaseMentors.map(({ email, ...rest }) => rest);
       }
       
-      console.log(`Total de ${allMentors.length} mentores disponibles`);
-      
       // Pasar el signal del AbortController a la petición
-      await processMentorsSequentially(allMentors, controller.signal);
+      await processMentorsOnce(allMentors, controller.signal, selectedModel);
       
       setLoading(false);
       setIsSearching(false);
     } catch (err) {
       // Verificar si el error fue por cancelación
       if (err.name === 'AbortError') {
-        console.log('Búsqueda cancelada por el usuario');
-        setError('Búsqueda cancelada');
+        console.log('Search canceled by user');
+        setError('Search canceled');
       } else {
-        console.error('Error durante el matching:', err);
+        // console error optional
         setError('Error: ' + err.message);
       }
       setLoading(false);
@@ -293,119 +262,120 @@ function App() {
   };
 
   useEffect(() => {
-    if (results.length > 0) {
-      console.log("Primer mentor recibido:", results[0].mentor);
+    if (results.length > 0 && !confettiFired) {
+      confetti({
+        particleCount: 120,
+        spread: 70,
+        origin: { y: 0.6 }
+      });
+      setConfettiFired(true);
     }
-  }, [results]);
+    if (results.length === 0) {
+      setConfettiFired(false);
+    }
+  }, [results, confettiFired]);
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>Mentoring Matcher</h1>
-        <div className="supabase-status">
-          {supabaseStatus}
-        </div>
+    <>
+      <header className="navbar">
+        <img src="/logo.svg" alt="Mentoring Matcher logo" className="navbar-logo" />
       </header>
-      
-      <main>
-        <div className="mentor-search-form">
-          <h1>Encuentra tu mentor ideal</h1>
-          
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label htmlFor="name">Tu nombre:</label>
-              <input
-                id="name"
-                type="text"
-                value={menteeInfo.name}
-                onChange={(e) => setMenteeInfo({...menteeInfo, name: e.target.value})}
-                placeholder="Escribe tu nombre"
-              />
-            </div>
+      <div className="App">
+        <main>
+          <div className="mentor-search-form">
+            <h1>Find your ideal mentor</h1>
             
-            <div className="form-group">
-              <label htmlFor="lookingFor">¿Qué buscas en el programa de mentoring?</label>
-              <textarea
-                id="lookingFor"
-                value={menteeInfo.lookingFor}
-                onChange={(e) => setMenteeInfo({...menteeInfo, lookingFor: e.target.value})}
-                placeholder="Describe lo que te gustaría conseguir"
-                rows={4}
-              />
-            </div>
-            
-            <button type="submit" className="search-button" disabled={loading}>
-              {loading ? 'Buscando mentores...' : 'Encontrar Mentores'}
-            </button>
-          </form>
-          
-          {error && <div className="error">{error}</div>}
-        </div>
-        
-        {loading && (
-          <div className="progress-floating">
-            <div className="header-row">
-              <h4>
-                Evaluando compatibilidad
-                <span className="percentage-badge">
-                  {Math.min(Math.round((progress.processed / progress.total) * 100), 100)}%
-                </span>
-              </h4>
-            </div>
-            
-            <div className="content-row">
-              <div className="progress-container">
-                <div 
-                  className="progress-bar" 
-                  style={{
-                    width: `${Math.min(Math.round((progress.processed / progress.total) * 100), 100)}%`
-                  }}
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label htmlFor="name">Your name:</label>
+                <input
+                  id="name"
+                  type="text"
+                  value={menteeInfo.name}
+                  onChange={(e) => setMenteeInfo({...menteeInfo, name: e.target.value})}
+                  placeholder="Enter your name"
                 />
               </div>
               
-              <div className="progress-stats">
-                {progress.processed} de {progress.total} mentores
+              <div className="form-group">
+                <label htmlFor="lookingFor">What are you looking to get from the mentoring program?</label>
+                <textarea
+                  id="lookingFor"
+                  value={menteeInfo.lookingFor}
+                  onChange={(e) => setMenteeInfo({...menteeInfo, lookingFor: e.target.value})}
+                  placeholder="e.g. I want to improve my communication skills, I want to become a CTO"
+                  rows={4}
+                />
               </div>
               
-              <button 
-                className="cancel-button" 
-                onClick={handleCancelSearch}
-              >
-                Detener búsqueda
+              <button type="submit" className="search-button" disabled={loading}>
+                {loading ? 'Searching mentors...' : 'Find mentors'}
               </button>
-            </div>
+            </form>
+            
+            {error && <div className="error">{error}</div>}
           </div>
-        )}
-        
-        {results.length > 0 && (
-          <div className="results-container">
-            <h2>Tus mejores matches ({results.length})</h2>
-            <div className="results">
-              {results.map((match, index) => (
-                <div key={index} className="match-card">
-                  {/* Score general */}
-                  <div className="match-score">{match.score}%</div>
-                  
-                  {/* Información básica */}
-                  <h3>{match.mentor.name}</h3>
-                  <p className="mentor-title">{match.mentor.title}</p>
-                  
-                  {/* Bio */}
-                  <div className="mentor-bio">
-                    <p>{match.mentor.bio}</p>
-                  </div>
-                  
-                  <div className="match-score">
-                    Match: {match.score}%
-                  </div>
-                </div>
-              ))}
+          
+          {loading && (
+            <div className="loading-overlay">
+              <div className="loader" />
+              <span className="loading-text">Searching mentors...</span>
+              <button className="cancel-button" onClick={handleCancelSearch}>Stop search</button>
             </div>
-          </div>
-        )}
-      </main>
-    </div>
+          )}
+          
+          {results.length > 0 && (
+            <div className="results-container">
+              <h2>Your best matches ({results.length})</h2>
+              <div className="results">
+                {results.map((match, index) => (
+                  <div key={index} className="match-card">
+                    <div className="mentor-header">
+                      <h3>{formatName(match.mentor.name)}</h3>
+                      {match.mentor.is_available !== undefined && !match.mentor.is_available && (
+                        <span className="availability-tag">Not available</span>
+                      )}
+                    </div>
+                    
+                    {/* Bio */}
+                    <div className="mentor-bio">
+                      <p>{match.mentor.bio}</p>
+                    </div>
+                    
+                    {/* Enlace al perfil del mentor - botón primario */}
+                    {match.mentor.id && (
+                      <div className="mentor-actions">
+                        <a
+                          href={`https://app.novatalent.com/mentoring/mentor/${match.mentor.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="primary-button"
+                        >
+                          View mentor profile
+                        </a>
+
+                        <button
+                          className="copy-link"
+                          onClick={() => navigator.clipboard.writeText(`https://app.novatalent.com/mentoring/mentor/${match.mentor.id}`)}
+                        >
+                          Copy Nova URL
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="match-score">Match: {match.score}%</div>
+                    {match.mentor.title && match.mentor.title !== 'No especificado' && (
+                      <p className="mentor-title">{match.mentor.title}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </>
   );
 }
 
-export default App; 
+export default App;

@@ -4,6 +4,10 @@ const OpenAI = require('openai');
 require('dotenv').config();
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
+
+// Flag para activar logs detallados: export DEBUG_LOGS=true
+const DEBUG = process.env.DEBUG_LOGS === 'true';
 
 // Método de importación dinámica para p-limit (compatible con ESM)
 let pLimit;
@@ -72,6 +76,49 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// ================= EMBEDDINGS SETUP =================
+let mentorEmbeddings = new Map();
+
+(() => {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'mentor_embeddings.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+
+    if (Array.isArray(parsed)) {
+      parsed.forEach((item) => {
+        const id = item.id || item.mentor_id || item.mentorId;
+        const vector = item.embedding || item.vector || item.embedding_vector;
+        if (id && Array.isArray(vector)) {
+          mentorEmbeddings.set(id, vector);
+        }
+      });
+    } else {
+      // Si es objeto {id: vector}
+      Object.entries(parsed).forEach(([id, vector]) => {
+        if (Array.isArray(vector)) {
+          mentorEmbeddings.set(id, vector);
+        }
+      });
+    }
+    console.log(`Embeddings cargados: ${mentorEmbeddings.size}`);
+  } catch (err) {
+    console.error('No se pudieron cargar embeddings:', err.message);
+  }
+})();
+
+// Función para similitud coseno rápida
+function cosineSimilarity(a, b) {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
 // Verificar sólo la API Key de OpenAI
 console.log("Estado de API Key de OpenAI:", process.env.OPENAI_API_KEY ? "Configurada ✅" : "NO CONFIGURADA ❌");
 if (process.env.OPENAI_API_KEY) {
@@ -84,7 +131,7 @@ app.get('/api/test', (req, res) => {
 });
 
 // Función para evaluar un mentor con puntuación por componentes - versión optimizada
-const evaluateMentor = async (mentor, mentee, requestId) => {
+const evaluateMentor = async (mentor, mentee, requestId, modelName = "gpt-3.5-turbo") => {
   try {
     // Primero normalizar el mentor
     const normalizedMentor = {
@@ -98,16 +145,18 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
       company: mentor.company || mentor.current_company || mentor.organization || 'No especificada',
       bio: extractBio(mentor),
       // Añadir el current_title explícitamente
-      current_title: mentor.current_title
+      current_title: mentor.current_title,
+      is_available: mentor.is_available
     };
 
-    // Debug log
-    console.log(`
-    ========= DEBUG MATCH [${requestId}] =========
-    MENTEE BUSCA: "${mentee.lookingFor}"
-    MENTOR BIO: "${normalizedMentor.bio}"
-    =======================================
-    `);
+    if (DEBUG) {
+      console.log(`
+      ========= DEBUG MATCH [${requestId}] =========
+      MENTEE BUSCA: "${mentee.lookingFor}"
+      MENTOR BIO: "${normalizedMentor.bio}"
+      =======================================
+      `);
+    }
     
     // VERIFICACIÓN DE COINCIDENCIA EXACTA
     // Si el texto del mentee es idéntico al texto del mentor, asignar 100% directamente
@@ -126,7 +175,7 @@ const evaluateMentor = async (mentor, mentee, requestId) => {
     
     // Si no hay coincidencia exacta, continuar con la evaluación normal
     const compatibilityResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: modelName,
       messages: [
         { 
           role: "system", 
@@ -188,7 +237,8 @@ No sobrevalores habilidades transferibles o generales.
 Responde con el JSON requerido.`
         }
       ],
-      temperature: 0.3, // Permitir más flexibilidad para análisis semántico
+      temperature: 0.2,
+      response_format: { type: "json_object" },
     });
 
     // Analizar la respuesta JSON
@@ -210,7 +260,9 @@ Responde con el JSON requerido.`
 // Función auxiliar para extraer bio de manera eficiente
 function extractBio(mentor) {
   // Diagnóstico completo de todos los campos para identificar el problema
-  console.log("[DIAGNÓSTICO COMPLETO]", JSON.stringify(mentor));
+  if (DEBUG) {
+    console.log(`[DIAGNÓSTICO COMPLETO]`, JSON.stringify(mentor));
+  }
   
   if (typeof mentor.bio === 'string') return mentor.bio;
   if (mentor.description) return mentor.description;
@@ -252,7 +304,8 @@ function createLimiter(maxConcurrent) {
 app.post('/api/match', async (req, res) => {
   try {
     const requestId = uuidv4().slice(0, 8);
-    const { mentee, mentors } = req.body;
+    const { mentee, mentors, model } = req.body;
+    const modelName = model || "gpt-3.5-turbo";
     
     if (!mentee || !mentors || !Array.isArray(mentors)) {
       return res.status(400).json({ error: 'Datos incompletos' });
@@ -261,7 +314,37 @@ app.post('/api/match', async (req, res) => {
     // Conservar todos los datos originales sin modificarlos
     console.log("[DATOS ORIGINALES RECIBIDOS]:", mentors[0]);
     
-    const mentorsToProcess = mentors;
+    let mentorsToProcess = mentors;
+
+    // ================= EMBEDDING FILTRADO =================
+    console.log(`[${requestId}] Iniciando filtrado por embeddings…`);
+    console.log('  mentee.lookingFor:', mentee.lookingFor);
+    console.log('  embeddings disponibles:', mentorEmbeddings.size);
+
+    if (mentorEmbeddings.size > 0 && mentee.lookingFor) {
+      try {
+        const embedResp = await openai.embeddings.create({
+          model: 'text-embedding-3-small',
+          input: mentee.lookingFor
+        });
+        const menteeVector = embedResp.data[0].embedding;
+
+        const scored = mentors.map((mentor) => {
+          const id = mentor.id || mentor.mentor_id || mentor.userId;
+          const vec = mentorEmbeddings.get(id);
+          const sim = vec ? cosineSimilarity(menteeVector, vec) : -1;
+          return { mentor, sim };
+        });
+
+        scored.sort((a, b) => b.sim - a.sim);
+        mentorsToProcess = scored.slice(0, 200).map((s) => s.mentor);
+        console.log(`[${requestId}] Embedding mentee generado OK`);
+        console.log(`[${requestId}] Filtrado embeddings: ${mentorsToProcess.length}/${mentors.length}`);
+      } catch (embErr) {
+        console.error(`[${requestId}] Error durante filtrado por embeddings:`, embErr);
+      }
+    }
+
     const batchSize = mentorsToProcess.length;
     const startTime = Date.now();
     
@@ -333,8 +416,10 @@ app.post('/api/match', async (req, res) => {
         
         try {
           // Procesar mentor individualmente
-          console.log("[ESTRUCTURA COMPLETA]", JSON.stringify(mentor, null, 2));
-          const result = await evaluateMentor(mentor, mentee, requestId);
+          if (DEBUG) {
+            console.log("[ESTRUCTURA COMPLETA]", JSON.stringify(mentor, null, 2));
+          }
+          const result = await evaluateMentor(mentor, mentee, requestId, modelName);
           
           // Actualizar resultados y estadísticas
           results[index] = result;
@@ -387,7 +472,7 @@ app.post('/api/match', async (req, res) => {
     =============================
     `);
     
-    res.json({
+    const responsePayload = {
       matches,
       stats: {
         totalProcessed: processed,
@@ -395,8 +480,10 @@ app.post('/api/match', async (req, res) => {
         failed,
         totalTime: processingTime.toFixed(2),
         avgTimePerMentor: avgTimePerMentor.toFixed(2)
-      }
-    });
+      },
+      selectedMentorIds: mentorsToProcess.map(m => m.id || m.mentor_id || m.userId)
+    };
+    res.json(responsePayload);
     
   } catch (error) {
     console.error('❌ Error global en procesamiento:', error);
@@ -429,3 +516,8 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   next();
 });
+
+// Silenciar logs en producción para evitar ruido en la consola del navegador
+if (process.env.NODE_ENV !== 'development') {
+  console.log = () => {};
+}
