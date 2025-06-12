@@ -454,7 +454,8 @@ select {
 input::placeholder,
 textarea::placeholder {
   font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, sans-serif;
-  color: var(--notion-gray);
+  color: #9ca3af; /* gris más claro para guías */
+  font-size: 0.9rem; /* ligeramente más pequeño */
 }
 
 /* --- Global reset for consistent spacing --- */
