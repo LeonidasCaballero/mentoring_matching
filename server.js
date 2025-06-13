@@ -136,6 +136,62 @@ app.get('/api/test', (req, res) => {
   res.json({ message: 'Servidor funcionando correctamente' });
 });
 
+// Endpoint para obtener estadísticas de peticiones
+app.get('/api/stats', async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ error: 'Base de datos no disponible' });
+  }
+
+  try {
+    // Estadísticas generales
+    const { data: totalRequests, error: totalError } = await supabase
+      .from('user_requests')
+      .select('id', { count: 'exact' });
+
+    if (totalError) throw totalError;
+
+    // Peticiones por día (últimos 7 días)
+    const { data: dailyStats, error: dailyError } = await supabase
+      .from('user_requests')
+      .select('created_at')
+      .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+
+    if (dailyError) throw dailyError;
+
+    // Búsquedas más comunes (últimas 50)
+    const { data: recentSearches, error: searchError } = await supabase
+      .from('user_requests')
+      .select('mentee_looking_for, matches_found, processing_time_seconds')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (searchError) throw searchError;
+
+    // Tiempo promedio de procesamiento
+    const { data: avgTime, error: avgError } = await supabase
+      .from('user_requests')
+      .select('processing_time_seconds');
+
+    if (avgError) throw avgError;
+
+    const avgProcessingTime = avgTime.length > 0 
+      ? avgTime.reduce((sum, r) => sum + (r.processing_time_seconds || 0), 0) / avgTime.length
+      : 0;
+
+    res.json({
+      totalRequests: totalRequests?.length || 0,
+      dailyRequests: dailyStats?.length || 0,
+      avgProcessingTime: avgProcessingTime.toFixed(2),
+      recentSearches: recentSearches?.slice(0, 10) || [],
+      lastUpdated: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error obteniendo estadísticas:', error);
+    res.status(500).json({ error: 'Error obteniendo estadísticas: ' + error.message });
+  }
+});
+
 // Función para evaluar un mentor con puntuación por componentes - versión optimizada
 const evaluateMentor = async (mentor, mentee, requestId, modelName = "gpt-3.5-turbo") => {
   try {
@@ -305,6 +361,64 @@ function createLimiter(maxConcurrent) {
     });
   };
 }
+
+// Función para guardar la petición en la base de datos
+const saveUserRequest = async (requestId, mentee, matches, stats, modelName) => {
+  if (!supabase) {
+    console.log(`[${requestId}] Supabase no disponible - no se guarda la petición`);
+    return null;
+  }
+
+  try {
+    // Guardar petición principal
+    const { data: requestData, error: requestError } = await supabase
+      .from('user_requests')
+      .insert([{
+        request_id: requestId,
+        mentee_name: mentee.name || 'Anónimo',
+        mentee_looking_for: mentee.lookingFor,
+        total_mentors_processed: parseInt(stats.totalProcessed),
+        matches_found: matches.length,
+        processing_time_seconds: parseFloat(stats.totalTime),
+        model_used: modelName
+      }])
+      .select()
+      .single();
+
+    if (requestError) {
+      console.error(`[${requestId}] Error guardando petición:`, requestError.message);
+      return null;
+    }
+
+    console.log(`[${requestId}] ✅ Petición guardada en DB con ID: ${requestData.id}`);
+
+    // Guardar matches individuales (solo los top 10 para no saturar)
+    if (matches.length > 0) {
+      const topMatches = matches.slice(0, 10).map(match => ({
+        request_id: requestData.id,
+        mentor_id: match.mentor.id,
+        mentor_name: match.mentor.name,
+        match_score: match.score,
+        match_explanation: match.explanation
+      }));
+
+      const { error: matchesError } = await supabase
+        .from('user_matches')
+        .insert(topMatches);
+
+      if (matchesError) {
+        console.error(`[${requestId}] Error guardando matches:`, matchesError.message);
+      } else {
+        console.log(`[${requestId}] ✅ ${topMatches.length} matches guardados en DB`);
+      }
+    }
+
+    return requestData.id;
+  } catch (error) {
+    console.error(`[${requestId}] Error crítico guardando en DB:`, error.message);
+    return null;
+  }
+};
 
 // Sistema optimizado de procesamiento de mentores
 app.post('/api/match', async (req, res) => {
@@ -507,6 +621,10 @@ app.post('/api/match', async (req, res) => {
       },
       selectedMentorIds: mentorsToProcess.map(m => m.id || m.mentor_id || m.userId)
     };
+
+    // Guardar petición en la base de datos
+    await saveUserRequest(requestId, mentee, matches, responsePayload.stats, modelName);
+    
     res.json(responsePayload);
     
   } catch (error) {
