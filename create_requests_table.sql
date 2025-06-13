@@ -8,11 +8,7 @@ CREATE TABLE user_requests (
   matches_found INTEGER,
   processing_time_seconds DECIMAL(10,2),
   model_used VARCHAR(50) DEFAULT 'gpt-3.5-turbo',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  
-  -- Índices para consultas comunes
-  INDEX idx_created_at (created_at),
-  INDEX idx_request_id (request_id)
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Tabla para guardar los matches individuales (opcional, para análisis detallado)
@@ -23,12 +19,15 @@ CREATE TABLE user_matches (
   mentor_name VARCHAR(255),
   match_score INTEGER NOT NULL,
   match_explanation TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  
-  INDEX idx_request_id (request_id),
-  INDEX idx_mentor_id (mentor_id),
-  INDEX idx_match_score (match_score)
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Crear índices por separado
+CREATE INDEX idx_user_requests_created_at ON user_requests(created_at);
+CREATE INDEX idx_user_requests_request_id ON user_requests(request_id);
+CREATE INDEX idx_user_matches_request_id ON user_matches(request_id);
+CREATE INDEX idx_user_matches_mentor_id ON user_matches(mentor_id);
+CREATE INDEX idx_user_matches_score ON user_matches(match_score);
 
 -- Comentarios para documentación
 COMMENT ON TABLE user_requests IS 'Registro de peticiones de matching de usuarios';
