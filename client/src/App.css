@@ -500,6 +500,13 @@ textarea::placeholder {
   font-weight: 500;
 }
 
+/* Subtext beneath loading message */
+.loading-subtext {
+  font-size: 0.8rem;
+  color: var(--notion-gray);
+  text-align: center;
+}
+
 /* Optional: hide old progress-floating bar via display none to avoid leakage */
 .progress-floating { display: none; }
 

@@ -325,6 +325,7 @@ function App() {
             <div className="loading-overlay">
               <div className="loader" />
               <span className="loading-text">Searching mentors...</span>
+              <span className="loading-subtext">This process usually takes around 15 secs.</span>
               <button className="cancel-button" onClick={handleCancelSearch}>Stop search</button>
             </div>
           )}
